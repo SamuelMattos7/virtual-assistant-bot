@@ -17,11 +17,16 @@ st.title("📚 Chat con tus PDFs (DeepSeek)")
 
 
 load_dotenv()
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+os.environ["OPENAI_API_KEY"] = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 
 DOCS_DIR = Path("documents")
-DB_DIR = "chroma_db"
 DOCS_DIR.mkdir(exist_ok=True)
+
+@st.cache_resource(show_spinner=False)
+def load_embeddings():
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
 
 # 2. Funciones cacheadas para no recargar la BD en cada interacción
 @st.cache_resource(show_spinner=False)
@@ -47,26 +52,18 @@ def initialize_rag_system():
                 
         return documents
 
-    # Configuración de BD Vectorial
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    chroma_client = chromadb.PersistentClient(path=DB_DIR)
-    
-    try:
-        collection = chroma_client.get_collection(name="rag_collection")
-        if collection.count() > 0:
-            def retrieve_existing(query: str):
-                query_embedding = embeddings.embed_query(query)
-                results = collection.query(query_embeddings=[query_embedding], n_results=3)
-                if results and results.get("documents") and results["documents"]:
-                    flattened_docs = [doc for sublist in results["documents"] for doc in sublist]
-                    return "\n\n".join(flattened_docs)
-                return ""
-            retrieve_fn = retrieve_existing
-            is_new = False
-    except Exception:
-        is_new = True
+    # Barra de progreso para la inicialización
+    progress = st.progress(0, text="Cargando modelo de embeddings...")
+    embeddings = load_embeddings()
+    progress.progress(33, text="Conectando a ChromaDB...")
 
-    if 'is_new' in locals() and is_new:
+    # Configuración de BD Vectorial
+    chroma_client = chromadb.EphemeralClient()
+
+    is_new = True
+    chroma_client.delete_collection(name="rag_collection") if "rag_collection" in [c.name for c in chroma_client.list_collections()] else None
+
+    if is_new:
         raw_docs = load_pdfs_from_directory(DOCS_DIR)
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = []
@@ -99,8 +96,19 @@ def initialize_rag_system():
             return ""
             
         retrieve_fn = retrieve_new
+    else:
+        def retrieve_existing(query: str):
+            query_embedding = embeddings.embed_query(query)
+            results = collection.query(query_embeddings=[query_embedding], n_results=3)
+            if results and results.get("documents") and results["documents"]:
+                flattened_docs = [doc for sublist in results["documents"] for doc in sublist]
+                return "\n\n".join(flattened_docs)
+            return ""
+
+        retrieve_fn = retrieve_existing
 
     # Configuración de LLM y Cadena RAG
+    progress.progress(66, text="Preparando cadena RAG...")
     llm = ChatOpenAI(
         model="deepseek-chat", 
         openai_api_base="https://api.deepseek.com",
@@ -126,7 +134,9 @@ def initialize_rag_system():
         | llm
         | StrOutputParser()
     )
-    
+
+    progress.progress(100, text="¡Listo!")
+    progress.empty()
     return chain
 
 # 3. Inicializar sistema con un spinner visual
