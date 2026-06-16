@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+.venv/
+
+# VS Code
+.vscode/
+
+# ChromaDB (local vector store — usually don't commit this)
+virtual-assistant-bot/chroma_db/
+
+# Uploaded docs (if they're local/private)
+virtual-assistant-bot/documents/

@@ -15,10 +15,11 @@ from langchain_core.output_parsers import StrOutputParser
 st.set_page_config(page_title="DeepSeek PDF Chat", page_icon="📚", layout="centered")
 st.title("📚 Chat con tus PDFs (DeepSeek)")
 
-
+# 3. Cargar variables de entorno y clave de API
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 
+# 4. Configuración del directorio de documentos
 DOCS_DIR = Path("documents")
 DOCS_DIR.mkdir(exist_ok=True)
 
@@ -28,7 +29,7 @@ def load_embeddings():
         model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
-# 2. Funciones cacheadas para no recargar la BD en cada interacción
+# 5. Funciones cacheadas para no recargar la BD en cada interacción
 @st.cache_resource(show_spinner=False)
 def initialize_rag_system():
     # Carga de PDFs
@@ -139,7 +140,32 @@ def initialize_rag_system():
     progress.empty()
     return chain
 
-# 3. Inicializar sistema con un spinner visual
+# 6. UI de subida de archivos
+st.subheader("📄 Sube tus PDFs")
+uploaded_files = st.file_uploader(
+    "Sube uno o más archivos PDF",
+    type="pdf",
+    accept_multiple_files=True
+)
+
+# Opción para mantener archivos entre recargas (simula el botón "Keep")
+keep_uploaded = st.checkbox("Mantener archivos subidos entre recargas", value=True)
+
+if uploaded_files:
+    for f in uploaded_files:
+        with open(DOCS_DIR / f.name, "wb") as out:
+            out.write(f.read())
+    initialize_rag_system.clear()  # ← forces rebuild with new PDFs
+    st.success(f"{len(uploaded_files)} archivo(s) cargado(s) correctamente.")
+else:
+    saved_pdfs = list(DOCS_DIR.glob("*.pdf"))
+    if keep_uploaded and saved_pdfs:
+        st.info(f"Usando {len(saved_pdfs)} archivo(s) PDF previamente subido(s).")
+    else:
+        st.info("Por favor sube al menos un PDF para comenzar.")
+        st.stop()  # ← stops here until user uploads something
+
+# 8. Inicializar sistema con un spinner visual
 with st.spinner("Conectando con la base de datos y preparando DeepSeek..."):
     rag_chain = initialize_rag_system()
 
